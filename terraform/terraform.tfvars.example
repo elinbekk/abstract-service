@@ -1,0 +1,4 @@
+# Copy this file to terraform.tfvars and fill in your values
+cloud_id  = "your-cloud-id"
+folder_id = "your-folder-id"
+prefix    = "lecture-notes"
