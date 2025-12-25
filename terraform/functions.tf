@@ -124,6 +124,14 @@ paths:
       responses:
         '200':
           description: OK
+  /tasks:
+    get:
+      x-yc-apigateway-integration:
+        type: cloud_functions
+        function_id: ${yandex_function.api.id}
+      responses:
+        '200':
+          description: OK
   /api/tasks:
     get:
       x-yc-apigateway-integration:

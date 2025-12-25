@@ -5,11 +5,12 @@ import requests
 import tempfile
 import subprocess
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import boto3
 import time
 from botocore.exceptions import ClientError
 import logging
+import html
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
@@ -705,8 +706,9 @@ class LectureNotesWorker:
                 # Mark task as completed but note transcription error in status message
                 self.update_task_status(task_id, 'processing', 90, f"MP3 ready (transcription failed: {str(e)[:100]})")
 
-            # Step 5: Generate abstract using YandexGPT
+            # Step 5: Generate abstract using YandexGPT and create PDF
             abstract_url = None
+            pdf_url = None
             if transcription:
                 try:
                     self.update_task_status(task_id, 'processing', 92, "Generating lecture abstract...")
@@ -716,7 +718,7 @@ class LectureNotesWorker:
                     abstract = self.process_text_with_gpt(transcription, title)
 
                     if abstract:
-                        # Upload abstract to storage
+                        # Upload abstract to storage (markdown - kept as backup)
                         abstract_key = f"abstracts/{task_id}.md"
                         abstract_url = self.upload_text_to_storage(
                             abstract,
@@ -724,9 +726,19 @@ class LectureNotesWorker:
                             content_type='text/markdown'
                         )
                         logger.info(f"Abstract uploaded to: {abstract_url}")
+
+                        # Step 5b: Generate PDF from abstract
+                        self.update_task_status(task_id, 'processing', 95, "Generating PDF...")
+                        logger.info("Generating PDF from abstract...")
+
+                        pdf_path = self.generate_pdf_notes(abstract, title, task_id)
+                        pdf_url = self.save_pdf_to_storage(pdf_path, task_id, title)
+
+                        logger.info(f"PDF generated and saved to: {pdf_url}")
                 except Exception as e:
-                    logger.error(f"Abstract generation failed: {e}")
-                    # Continue without abstract - it's not critical
+                    logger.error(f"Abstract/PDF generation failed: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Step 6: Update task as completed
             task_result = {
@@ -738,13 +750,22 @@ class LectureNotesWorker:
             # Add transcription if successful
             if transcription:
                 task_result['transcription'] = transcription
-                status_message = "Processing completed - MP3, transcription and abstract ready"
-            else:
-                status_message = "Processing completed - MP3 ready (transcription unavailable)"
 
             # Add abstract URL if generated
             if abstract_url:
                 task_result['abstract_url'] = abstract_url
+
+            # Add PDF URL if generated
+            if pdf_url:
+                task_result['pdf_url'] = pdf_url
+
+            # Set status message based on what was generated
+            if pdf_url:
+                status_message = "Processing completed - PDF, MP3, transcription and abstract ready"
+            elif transcription:
+                status_message = "Processing completed - MP3 and transcription ready"
+            else:
+                status_message = "Processing completed - MP3 ready (transcription unavailable)"
 
             self.update_task_status(task_id, 'completed', 100, status_message, task_result)
 
@@ -935,14 +956,14 @@ Format your response in Markdown with proper headers."""
             heading_style = styles['Heading1']
             normal_style = styles['Normal']
 
-            # Add title
-            title_paragraph = Paragraph(title, title_style)
+            # Add title (escape HTML special chars)
+            title_paragraph = Paragraph(html.escape(title), title_style)
             story.append(title_paragraph)
             story.append(Spacer(1, 12))
 
-            # Add generation timestamp
+            # Add generation timestamp (escape HTML special chars)
             timestamp = f"Сгенерировано: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-            timestamp_paragraph = Paragraph(timestamp, normal_style)
+            timestamp_paragraph = Paragraph(html.escape(timestamp), normal_style)
             story.append(timestamp_paragraph)
             story.append(Spacer(1, 20))
 
@@ -956,7 +977,7 @@ Format your response in Markdown with proper headers."""
                     if current_section:
                         # Join current section into a paragraph
                         paragraph_text = ' '.join(current_section)
-                        paragraph = Paragraph(paragraph_text, normal_style)
+                        paragraph = Paragraph(html.escape(paragraph_text), normal_style)
                         story.append(paragraph)
                         story.append(Spacer(1, 6))
                         current_section = []
@@ -964,11 +985,11 @@ Format your response in Markdown with proper headers."""
                     # Likely a heading
                     if current_section:
                         paragraph_text = ' '.join(current_section)
-                        paragraph = Paragraph(paragraph_text, normal_style)
+                        paragraph = Paragraph(html.escape(paragraph_text), normal_style)
                         story.append(paragraph)
                         current_section = []
 
-                    heading = Paragraph(line, heading_style)
+                    heading = Paragraph(html.escape(line), heading_style)
                     story.append(heading)
                     story.append(Spacer(1, 12))
                 else:
@@ -977,7 +998,7 @@ Format your response in Markdown with proper headers."""
             # Add any remaining text
             if current_section:
                 paragraph_text = ' '.join(current_section)
-                paragraph = Paragraph(paragraph_text, normal_style)
+                paragraph = Paragraph(html.escape(paragraph_text), normal_style)
                 story.append(paragraph)
 
             # Generate PDF
@@ -1009,6 +1030,7 @@ Format your response in Markdown with proper headers."""
                 Key=storage_key,
                 Body=pdf_content,
                 ContentType='application/pdf',
+                ACL='public-read',
                 Metadata={
                     'task_id': task_id,
                     'title': title,
@@ -1026,6 +1048,67 @@ Format your response in Markdown with proper headers."""
             logger.error(f"Failed to save PDF to storage: {e}")
             raise Exception(f"PDF storage failed: {e}")
 
+    def cleanup_old_files(self, max_age_hours=1):
+        """Delete temporary files and old tasks from object storage"""
+        try:
+            logger.info(f"Starting cleanup: removing items older than {max_age_hours} hours")
+
+            # Use timezone-aware datetime to match S3's LastModified format
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+
+            # All prefixes to clean up (including task metadata)
+            all_prefixes = [
+                'audio/',
+                'mp3/',
+                'abstracts/',
+                'transcriptions/',
+                'notes/',
+                'tasks/'
+            ]
+
+            total_deleted = 0
+
+            for prefix in all_prefixes:
+                try:
+                    paginator = self.s3_client.get_paginator('list_objects_v2')
+                    page_iterator = paginator.paginate(
+                        Bucket=self.storage_bucket,
+                        Prefix=prefix
+                    )
+
+                    for page in page_iterator:
+                        if 'Contents' not in page:
+                            continue
+
+                        objects_to_delete = []
+                        for obj in page['Contents']:
+                            # Use timezone-aware datetime for comparison
+                            if obj['LastModified'] < cutoff_time:
+                                objects_to_delete.append({'Key': obj['Key']})
+                                age_hours = (datetime.now(timezone.utc) - obj['LastModified']).total_seconds() / 3600
+                                logger.info(f"Marking for deletion: {obj['Key']} (age: {age_hours:.1f}h)")
+
+                        # Delete old objects
+                        if objects_to_delete:
+                            self.s3_client.delete_objects(
+                                Bucket=self.storage_bucket,
+                                Delete={'Objects': objects_to_delete}
+                            )
+                            total_deleted += len(objects_to_delete)
+                            logger.info(f"Deleted {len(objects_to_delete)} items from {prefix}")
+
+                except Exception as e:
+                    logger.error(f"Error cleaning up {prefix}: {e}")
+
+            logger.info(f"Cleanup complete: {total_deleted} items deleted (older than {max_age_hours}h)")
+            return total_deleted
+
+        except Exception as e:
+            logger.error(f"Error in cleanup_old_files: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return 0
+
 
 def handler(event, context):
     """Main handler for Yandex Cloud Functions"""
@@ -1035,6 +1118,12 @@ def handler(event, context):
     try:
         worker = LectureNotesWorker()
         logger.info("Worker initialized")
+
+        # Run cleanup on every invocation (checks for files older than 1 hour)
+        try:
+            worker.cleanup_old_files(max_age_hours=1)
+        except Exception as e:
+            logger.error(f"Cleanup failed (continuing anyway): {e}")
 
         # Handle triggered messages from queue (new approach)
         if 'messages' in event:

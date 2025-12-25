@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecture Notes Generator - Create</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Motiva Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            background: #171a21;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #c5c3c0;
+        }
+
+        .container {
+            background: linear-gradient(to right, #2a475e 0%, #1b2838 100%);
+            padding: 40px;
+            border-radius: 4px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 100%;
+            max-width: 500px;
+            border: 1px solid #3d4450;
+        }
+
+        h1 {
+            color: #ffffff;
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 28px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #8b929a;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #c5c3c0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"], input[type="url"], textarea {
+            width: 100%;
+            padding: 12px 16px;
+            background: #171a21;
+            border: 1px solid #3d4450;
+            border-radius: 2px;
+            color: #c5c3c0;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        input[type="text"]:focus, input[type="url"]:focus, textarea:focus {
+            outline: none;
+            border-color: #47bfff;
+            box-shadow: 0 0 10px rgba(71, 191, 255, 0.2);
+        }
+
+        input[type="text"]::placeholder, input[type="url"]::placeholder, textarea::placeholder {
+            color: #5c6370;
+        }
+
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+
+        .submit-btn {
+            background: linear-gradient(to right, #47bfff 0%, #1a9fff 100%);
+            color: #ffffff;
+            padding: 14px 30px;
+            border: none;
+            border-radius: 2px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+
+        .submit-btn:hover {
+            background: linear-gradient(to right, #66c0ff 0%, #2a9fff 100%);
+            box-shadow: 0 0 15px rgba(71, 191, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .nav-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .nav-link a {
+            color: #66c0ff;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+
+        .nav-link a:hover {
+            color: #47bfff;
+            text-decoration: underline;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 2px;
+            color: #ffffff;
+            font-weight: 500;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+            z-index: 1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .notification.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .notification.error {
+            background: linear-gradient(to right, #ff4949 0%, #cc0000 100%);
+        }
+
+        .notification.success {
+            background: linear-gradient(to right, #a4d007 0%, #6b8a00 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Lecture Notes Generator</h1>
+        <p class="subtitle">Transform video lectures into organized notes with AI</p>
+
+        <form id="lectureForm">
+            <div class="form-group">
+                <label for="title">Lecture Title</label>
+                <input type="text" id="title" name="title" placeholder="e.g., Introduction to Machine Learning" required>
+            </div>
+
+            <div class="form-group">
+                <label for="video_url">Video URL (Yandex Disk)</label>
+                <input type="url" id="video_url" name="video_url" placeholder="https://disk.yandex.ru/d/..." required>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description (Optional)</label>
+                <textarea id="description" name="description" placeholder="Additional details about the lecture..."></textarea>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submitBtn">
+                Generate Lecture Notes
+            </button>
+        </form>
+
+        <div class="nav-link">
+            <a href="/tasks">View All Tasks</a>
+        </div>
+    </div>
+
+    <script>
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            requestAnimationFrame(() => {
+                notification.classList.add('show');
+            });
+
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        document.getElementById('lectureForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const submitBtn = document.getElementById('submitBtn');
+            const originalText = submitBtn.textContent;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Processing...';
+
+            const data = {
+                title: document.getElementById('title').value,
+                video_url: document.getElementById('video_url').value,
+                description: document.getElementById('description').value
+            };
+
+            try {
+                const response = await fetch('/api/submit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    showNotification('Task created successfully!', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/tasks';
+                    }, 500);
+                } else {
+                    const error = await response.json();
+                    showNotification(error.error || 'Failed to submit', 'error');
+                }
+            } catch (error) {
+                console.error('Error submitting form:', error);
+                showNotification('Network error. Please try again.', 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            }
+        });
+    </script>
+</body>
+</html>
