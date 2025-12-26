@@ -545,6 +545,51 @@ def handle_download_pdf(task_id):
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         from io import BytesIO
+        import os
+
+        # Register a font that supports Cyrillic - try multiple sources
+        font_name = 'Helvetica'  # default fallback
+        font_registered = False
+
+        # List of font sources to try, in order
+        font_sources = [
+            '/tmp/Roboto-Regular.ttf',  # Cached download
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # System font
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',  # System font
+            '/usr/share/fonts/truetype/freefont/FreeSans.ttf',  # System font
+        ]
+
+        # Try to find/use an existing font first
+        for font_path in font_sources:
+            if os.path.exists(font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont('CyrillicFont', font_path))
+                    font_name = 'CyrillicFont'
+                    font_registered = True
+                    logger.info(f"Using font from: {font_path}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to register font {font_path}: {e}")
+
+        # If no font found, try downloading one
+        if not font_registered:
+            font_path = '/tmp/Roboto-Regular.ttf'
+            try:
+                import urllib.request
+                logger.info("Downloading Roboto font for Cyrillic support...")
+                # Use Google Fonts CDN (more reliable)
+                urllib.request.urlretrieve(
+                    "https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf",
+                    font_path,
+                    timeout=10
+                )
+                pdfmetrics.registerFont(TTFont('CyrillicFont', font_path))
+                font_name = 'CyrillicFont'
+                font_registered = True
+                logger.info("Font downloaded and registered successfully")
+            except Exception as e:
+                logger.error(f"Font download failed: {e}, Cyrillic may not display")
+                font_name = 'Helvetica'
 
         # Create PDF in memory
         buffer = BytesIO()
@@ -552,14 +597,15 @@ def handle_download_pdf(task_id):
         story = []
         styles = getSampleStyleSheet()
 
-        # Add custom styles
+        # Add custom styles with Cyrillic-supporting font
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Title'],
             fontSize=18,
             textColor='#000000',
             spaceAfter=20,
-            alignment=TA_CENTER
+            alignment=TA_CENTER,
+            fontName=font_name
         )
 
         heading_style = ParagraphStyle(
@@ -568,7 +614,8 @@ def handle_download_pdf(task_id):
             fontSize=14,
             textColor='#000000',
             spaceAfter=10,
-            spaceBefore=15
+            spaceBefore=15,
+            fontName=font_name
         )
 
         normal_style = ParagraphStyle(
@@ -577,7 +624,8 @@ def handle_download_pdf(task_id):
             fontSize=10,
             textColor='#000000',
             spaceAfter=8,
-            leading=14
+            leading=14,
+            fontName=font_name
         )
 
         # Sanitize title for PDF (escape XML special chars)

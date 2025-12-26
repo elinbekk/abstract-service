@@ -13,7 +13,7 @@ import logging
 import html
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.units import inch
 from moviepy import VideoFileClip
@@ -946,15 +946,84 @@ Format your response in Markdown with proper headers."""
             # Create PDF file path
             pdf_path = f"/tmp/{task_id}_notes.pdf"
 
+            # Register a font that supports Cyrillic - try multiple sources
+            font_name = 'Helvetica'  # default fallback
+            font_registered = False
+
+            # List of font sources to try, in order
+            font_sources = [
+                '/tmp/Roboto-Regular.ttf',  # Cached download
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # System font
+                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',  # System font
+                '/usr/share/fonts/truetype/freefont/FreeSans.ttf',  # System font
+            ]
+
+            # Try to find/use an existing font first
+            for font_path in font_sources:
+                if os.path.exists(font_path):
+                    try:
+                        from reportlab.pdfbase import pdfmetrics
+                        from reportlab.pdfbase.ttfonts import TTFont
+                        pdfmetrics.registerFont(TTFont('CyrillicFont', font_path))
+                        font_name = 'CyrillicFont'
+                        font_registered = True
+                        logger.info(f"Using font from: {font_path}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to register font {font_path}: {e}")
+
+            # If no font found, try downloading one
+            if not font_registered:
+                font_path = '/tmp/Roboto-Regular.ttf'
+                try:
+                    import urllib.request
+                    logger.info("Downloading Roboto font for Cyrillic support...")
+                    from reportlab.pdfbase import pdfmetrics
+                    from reportlab.pdfbase.ttfonts import TTFont
+                    # Use Google Fonts CDN (more reliable)
+                    urllib.request.urlretrieve(
+                        "https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf",
+                        font_path,
+                        timeout=10
+                    )
+                    pdfmetrics.registerFont(TTFont('CyrillicFont', font_path))
+                    font_name = 'CyrillicFont'
+                    font_registered = True
+                    logger.info("Font downloaded and registered successfully")
+                except Exception as e:
+                    logger.error(f"Font download failed: {e}, Cyrillic may not display")
+                    font_name = 'Helvetica'
+
             # Create PDF document
             doc = SimpleDocTemplate(pdf_path, pagesize=letter)
             story = []
 
-            # Get styles
+            # Get styles and customize with Cyrillic font
             styles = getSampleStyleSheet()
-            title_style = styles['Title']
-            heading_style = styles['Heading1']
-            normal_style = styles['Normal']
+
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Title'],
+                fontName=font_name,
+                fontSize=16,
+                leading=22
+            )
+
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading1'],
+                fontName=font_name,
+                fontSize=12,
+                leading=16
+            )
+
+            normal_style = ParagraphStyle(
+                'CustomNormal',
+                parent=styles['Normal'],
+                fontName=font_name,
+                fontSize=10,
+                leading=14
+            )
 
             # Add title (escape HTML special chars)
             title_paragraph = Paragraph(html.escape(title), title_style)
