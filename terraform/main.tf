@@ -73,7 +73,7 @@ resource "yandex_resourcemanager_folder_iam_member" "sa_queue_admin" {
 }
 
 # Use existing network
-data "yandex_vpc_network" "main" {
+resource "yandex_vpc_network" "main" {
   name = "lecture-svc-network"
 }
 
@@ -81,14 +81,14 @@ data "yandex_vpc_network" "main" {
 resource "yandex_vpc_subnet" "main" {
   name           = local.subnet_name
   zone           = "ru-central1-a"
-  network_id     = data.yandex_vpc_network.main.id
+  network_id     = yandex_vpc_network.main.id
   v4_cidr_blocks = ["10.0.1.0/24"]
 }
 
 # Security Group
 resource "yandex_vpc_security_group" "main" {
   name       = local.sg_name
-  network_id = data.yandex_vpc_network.main.id
+  network_id = yandex_vpc_network.main.id
 
   ingress {
     protocol       = "TCP"
@@ -116,6 +116,12 @@ resource "yandex_storage_bucket" "main" {
   bucket     = local.bucket_name
   access_key = yandex_iam_service_account_static_access_key.main.access_key
   secret_key = yandex_iam_service_account_static_access_key.main.secret_key
+
+  
+  depends_on = [
+    yandex_resourcemanager_folder_iam_member.sa_storage_admin,
+    yandex_resourcemanager_folder_iam_member.sa_storage_uploader
+  ]
 }
 
 resource "yandex_iam_service_account_static_access_key" "main" {
@@ -136,6 +142,10 @@ resource "yandex_ydb_database_serverless" "main" {
   description = "Lecture Notes Database"
 
   serverless_database {
+    storage_size_limit = 16
+  throttling_rcu_limit = 100  # Max 100 RCU for throttling
+  provisioned_rcu_limit = 50   # 50 RCU provisioned
+  enable_throttling_rcu_limit = true
   }
 
   depends_on = [yandex_resourcemanager_folder_iam_member.sa_editor]
@@ -148,6 +158,14 @@ resource "yandex_message_queue" "main" {
   message_retention_seconds   = 86400
   access_key                  = yandex_iam_service_account_static_access_key.main.access_key
   secret_key                  = yandex_iam_service_account_static_access_key.main.secret_key
+
+  
+  depends_on = [
+    yandex_resourcemanager_folder_iam_member.sa_admin,
+    yandex_resourcemanager_folder_iam_member.sa_editor,
+    yandex_resourcemanager_folder_iam_member.sa_queue_admin
+  ]
+
 }
 
 # Container Registry
